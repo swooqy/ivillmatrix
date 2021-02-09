@@ -6,25 +6,31 @@ import java.util.Random;
 public class GeneratorMatrix {
 
     protected int size;
-    protected int numberOfHypotesis;
+    protected int numberOfHypothesis;
     protected Random randomGenerator;
     protected ArrayList<Double> observations;
-    protected double[][] hypotesisList;
+    protected double[][] hypothesisList;
     protected double[][] matrixB;
+    protected double variance;
 
-    GeneratorMatrix (int size, double[][] hypotesisList){
+    GeneratorMatrix (int size, double[][] hypothesisList, double[][] matrixB, double variance){
         randomGenerator = new Random();
-        this.hypotesisList = hypotesisList.clone();
+        this.hypothesisList = hypothesisList.clone();
         this.size = size;
-        this.numberOfHypotesis= hypotesisList.length;
+        this.numberOfHypothesis = hypothesisList.length;
+        this.matrixB = matrixB.clone();
+        observations = new ArrayList<>();
+        this.variance = variance;
     }
 
-    private double generateGaussian(double mean, double variance){
-        return (randomGenerator.nextGaussian()*variance)+mean;
+    private double generateGaussian(){
+        return (randomGenerator.nextGaussian()*variance);
     }
 
-    private double generateXt(double mean, double variance, double[] uknownVector, double [] trend){
-        return multiplyVectors(uknownVector, trend) + generateGaussian(mean, variance);
+    private double generateXt(double[] trueValue, double [] trend){
+        double multiplication = multiplyVectors(trueValue, trend);
+        double gaussian = generateGaussian();
+        return multiplication + gaussian;
     }
 
     private double[] countTrend(int t){
@@ -43,63 +49,100 @@ public class GeneratorMatrix {
         return sum;
     }
 
-    private double n1(double xt, double[] hypotesis, double[] trend, double variance){
-        multiplyVectors(hypotesis, trend);
-        return 0;
+    private double n1(double xt, double[] hypothesis, double[] trend){
+        double mean = multiplyVectors(hypothesis, trend);
+        return (1 / variance * Math.sqrt(2 * Math.PI)) * Math.exp((-(xt - mean) * (xt - mean)) / (2 * variance * variance));
     }
 
-    private double countMatrixCellMultiplication(int i, int j, int n, double variance){
+    private double countMatrixCellMultiplication(int i, int j, int n){
         double upper;
         double lower;
         double multiplication=1;
         for(int t=1; t<=n; t++){
-            upper = n1(observations.get(t-1), hypotesisList[i], countTrend(t), variance);
-            lower = n1(observations.get(t-1), hypotesisList[j], countTrend(t), variance);
+            upper = n1(observations.get(t-1), hypothesisList[i], countTrend(t));
+            lower = n1(observations.get(t-1), hypothesisList[j], countTrend(t));
             multiplication*=upper/lower;
         }
         return multiplication;
     }
 
-    private double countMatrixCell(int i, int j, int n, double variance){
-        return Math.log(countMatrixCellMultiplication(i, j, n, variance));
+    private double countMatrixCell(int i, int j, int n){
+        return Math.log(countMatrixCellMultiplication(i, j, n));
     }
 
-    private double[][] countMatrix(int n, double variance){
-        double[][] matrix = new double[size][size];
-        for(int i=0; i<size; i++){
-            for(int j=0; j<size; j++){
-                matrix[i][j]=countMatrixCell(i, j, n, variance);
+    private double[][] countMatrix(int n){
+        double[][] matrix = new double[numberOfHypothesis][numberOfHypothesis];
+        for(int i = 0; i< numberOfHypothesis; i++){
+            for(int j = 0; j< numberOfHypothesis; j++){
+                matrix[i][j]=countMatrixCell(i, j, n);
             }
         }
         return matrix;
     }
 
     private boolean isExceedingMatrixB(double[][] matrix){
-        for(int i=0; i<numberOfHypotesis; i++){
-            for(int j=0; j<numberOfHypotesis; j++){
+        for(int i = 0; i< numberOfHypothesis; i++){
+            for(int j = 0; j< numberOfHypothesis; j++){
                 if(matrix[i][j] > matrixB[i][j]){
-                    return true;
+                    if(i!=j){
+                        return true;
+                    }
                 }
             }
         }
         return false;
     }
 
-
-
-    private void makeStep(double variance, double[] unknownVector, double[] trend){
+    private double[][] countMatrix(double[] trueValue){
         int t=1;
         double [][] currentMatrix;
         while(true){
-            observations.add(generateXt(t,variance, unknownVector, trend));
-            currentMatrix = countMatrix(t, variance);
+            observations.add(generateXt(trueValue, countTrend(t))); //здесь вместо генерации использовать реальные данные
+            currentMatrix = countMatrix(t);
             if(isExceedingMatrixB(currentMatrix)){
                 break;
             }
             t++;
         }
+        return currentMatrix;
     }
 
+    private double[] getTiList(double[][] matrix){
+        double[] tiList = new double[numberOfHypothesis];
+        for(int i = 0; i< numberOfHypothesis; i++){
+            double ti = 9999999;
+            for(int j = 0; j< numberOfHypothesis; j++){
+                if(matrix[i][j] > matrixB[i][j]){
+                    if(i!=j){
+                        if(matrix[i][j]<ti){
+                            ti=matrix[i][j];
+                        }
+                    }
+                }
+            }
+            tiList[i]=ti;
+        }
+        return tiList;
+    }
 
+    private int chooseHypothesis(double[] tiList){
+        double nb = 9999999;
+        for(int i = 0; i < numberOfHypothesis; i++){
+            if(tiList[i]<nb){
+                nb=tiList[i];
+            }
+        }
+        for(int i = 0; i< numberOfHypothesis; i++){
+            if(tiList[i]==nb){
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    public int doTest(double[] trueValue){
+        observations = new ArrayList<>();
+        return chooseHypothesis(getTiList(countMatrix(trueValue)));
+    }
 
 }
